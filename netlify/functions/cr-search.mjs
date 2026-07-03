@@ -308,6 +308,34 @@ export default async (req) => {
 
     const parsed = parseResultsTable(postHtml);
 
+    // Діагностичний режим: побачити СИРИЙ HTML таблиці "партії по турах" (art=9),
+    // щоб зрозуміти, як позначений колір фігур (зазвичай іконкою, не текстом)
+    if (url.searchParams.get("debugRounds") === "1" && parsed.rows.length) {
+      const first = parsed.rows[0];
+      const cleanLink = decodeEntities(first.tournamentLink);
+      const roundsUrl = `https://chess-results.com/${cleanLink}`;
+      const res2 = await fetch(roundsUrl, { headers: { "User-Agent": UA } });
+      const html2 = await res2.text();
+      const tables2 = [...html2.matchAll(/<table\b[^>]*>[\s\S]*?<\/table>/gi)].map((m) => m[0]);
+      tables2.sort((a, b) => b.length - a.length);
+      const rowsHtml2 = tables2.length
+        ? [...tables2[0].matchAll(/<tr\b[^>]*>[\s\S]*?<\/tr>/gi)].map((m) => m[0])
+        : [];
+      return new Response(
+        JSON.stringify(
+          {
+            tournament: first,
+            roundsUrl,
+            rawHeaderRow: rowsHtml2[0] || null,
+            rawDataRows: rowsHtml2.slice(1, 4),
+          },
+          null,
+          2
+        ),
+        { headers: { "Content-Type": "application/json; charset=utf-8" } }
+      );
+    }
+
     // Спеціальний діагностичний режим: перевірити структуру таблиці ОДНОГО турніру
     if (url.searchParams.get("debugTournament") === "1" && parsed.rows.length) {
       const first = parsed.rows[0];

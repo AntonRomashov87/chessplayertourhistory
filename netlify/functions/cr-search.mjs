@@ -68,6 +68,20 @@ function listFieldCandidates(html) {
   return results;
 }
 
+// Відомі точні імена полів на chess-results.com (визначено емпірично)
+const KNOWN_LAST_NAME_FIELD = "ctl00$P1$txt_nachname";
+const KNOWN_FIRST_NAME_FIELD = "ctl00$P1$txt_vorname";
+
+function extractSelectedValue(html, selectName) {
+  const selectRe = new RegExp(`<select[^>]*name=["']${selectName.replace(/\$/g, "\\$")}["'][^>]*>([\\s\\S]*?)</select>`, "i");
+  const selectMatch = selectRe.exec(html);
+  if (!selectMatch) return null;
+  const body = selectMatch[1];
+  const selectedOpt = /<option\b[^>]*value=["']([^"']*)["'][^>]*selected[^>]*>/i.exec(body);
+  if (selectedOpt) return selectedOpt[1];
+  const firstOpt = /<option\b[^>]*value=["']([^"']*)["'][^>]*>/i.exec(body);
+  return firstOpt ? firstOpt[1] : null;
+}
 function findSubmitButton(html) {
   // ASP.NET LinkButton -> викликає __doPostBack('ID','') замість справжнього submit.
   // Шукаємо onclick="...__doPostBack('...Search...','')" або input[type=submit]
@@ -146,9 +160,11 @@ export default async (req) => {
     const cookie = parseCookies(getRes.headers.get("set-cookie"));
 
     const hidden = extractHidden(getHtml);
-    const lastNameField = findInputNear(getHtml, ["Last name", "Nachname", "Прізвище"]);
-    const firstNameField = findInputNear(getHtml, ["First name", "Vorname", "Ім'я", "Имя"]);
+    const lastNameField = KNOWN_LAST_NAME_FIELD;
+    const firstNameField = KNOWN_FIRST_NAME_FIELD;
     const submitInfo = findSubmitButton(getHtml);
+    const sortValue = extractSelectedValue(getHtml, "ctl00$P1$combo_Sort");
+    const rowsValue = extractSelectedValue(getHtml, "ctl00$P1$combo_anzahl_zeilen");
 
     if (!lastNameField || !submitInfo) {
       return new Response(
@@ -173,6 +189,8 @@ export default async (req) => {
     for (const [k, v] of Object.entries(hidden)) body.set(k, v);
     body.set(lastNameField, lastName);
     if (firstNameField) body.set(firstNameField, firstName);
+    if (sortValue !== null) body.set("ctl00$P1$combo_Sort", sortValue);
+    if (rowsValue !== null) body.set("ctl00$P1$combo_anzahl_zeilen", rowsValue);
 
     if (submitInfo.name) {
       body.set(submitInfo.name, submitInfo.value);

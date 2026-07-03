@@ -163,7 +163,7 @@ function parseResultsTable(html) {
 // Дістає РЕАЛЬНІ очки гравця з таблиці підсумкового рейтингу конкретного турніру.
 // tournamentLink виглядає як "tnr1434540.aspx?lan=1&amp;art=9&amp;snr=1" -
 // snr тут номер гравця в стартовому списку, за яким шукаємо його рядок в таблиці.
-async function fetchRealPoints(tournamentLink, playerName) {
+async function fetchRealPoints(tournamentLink, playerName, debugMode = false) {
   try {
     const cleanLink = decodeEntities(tournamentLink);
     const fullUrl = `https://chess-results.com/${cleanLink}`;
@@ -174,22 +174,33 @@ async function fetchRealPoints(tournamentLink, playerName) {
     const html = await res.text();
 
     const tables = [...html.matchAll(/<table\b[^>]*>[\s\S]*?<\/table>/gi)].map((m) => m[0]);
-    if (!tables.length) return null;
+    if (!tables.length) return debugMode ? { error: "Таблиць не знайдено взагалі", fullUrl } : null;
     tables.sort((a, b) => b.length - a.length);
     const table = tables[0];
 
     const rowsHtml = [...table.matchAll(/<tr\b[^>]*>[\s\S]*?<\/tr>/gi)].map((m) => m[0]);
-    if (!rowsHtml.length) return null;
+    if (!rowsHtml.length) return debugMode ? { error: "Рядків у таблиці не знайдено", fullUrl } : null;
 
     const parseCells = (rowHtml) =>
       [...rowHtml.matchAll(/<t[dh]\b[^>]*>([\s\S]*?)<\/t[dh]>/gi)].map((m) =>
         decodeEntities(m[1].replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim())
       );
 
-    // Знаходимо індекс колонки "Pts." / "Punkte" в заголовку
     const headerCells = parseCells(rowsHtml[0]);
     const ptsIdx = headerCells.findIndex((c) => /^(pts\.?|points?|punkte)$/i.test(c));
     const snoIdx = headerCells.findIndex((c) => /^(sno|st\.?nr\.?|no\.?)$/i.test(c));
+
+    if (debugMode) {
+      return {
+        fullUrl,
+        snr,
+        headerCells,
+        ptsIdx,
+        snoIdx,
+        sampleDataRows: rowsHtml.slice(1, 6).map(parseCells),
+      };
+    }
+
     if (ptsIdx === -1) return null;
 
     for (let i = 1; i < rowsHtml.length; i++) {
@@ -202,8 +213,8 @@ async function fetchRealPoints(tournamentLink, playerName) {
       }
     }
     return null;
-  } catch {
-    return null;
+  } catch (err) {
+    return debugMode ? { error: String(err) } : null;
   }
 }
 
@@ -278,6 +289,15 @@ export default async (req) => {
     const postHtml = await postRes.text();
 
     const parsed = parseResultsTable(postHtml);
+
+    // Спеціальний діагностичний режим: перевірити структуру таблиці ОДНОГО турніру
+    if (url.searchParams.get("debugTournament") === "1" && parsed.rows.length) {
+      const first = parsed.rows[0];
+      const diag = await fetchRealPoints(first.tournamentLink, first.name, true);
+      return new Response(JSON.stringify({ tournament: first, diagnostic: diag }, null, 2), {
+        headers: { "Content-Type": "application/json; charset=utf-8" },
+      });
+    }
 
     // Якщо задано період (days) - фільтруємо ДО збагачення, щоб не робити
     // зайві запити по всіх ~100+ турнірах, а тільки по потрібних

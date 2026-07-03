@@ -182,9 +182,12 @@ async function fetchRealPoints(tournamentLink, playerName, debugMode = false) {
     // назву, яку показує пошукова таблиця
     const titleMatch = /<title>([\s\S]*?)<\/title>/i.exec(html);
     let fullTournamentName = titleMatch ? decodeEntities(titleMatch[1].replace(/\s+/g, " ").trim()) : null;
-    // Прибираємо типовий суфікс "Chess-results.com - " з початку title, якщо є
+    // Прибираємо типовий префікс title сторінки, якщо є (буває декілька варіантів)
     if (fullTournamentName) {
-      fullTournamentName = fullTournamentName.replace(/^chess-results\.com\s*-\s*/i, "").trim();
+      fullTournamentName = fullTournamentName
+        .replace(/^chess-results\.com\s*-\s*/i, "")
+        .replace(/^chess-results\s+server\s+chess-results\.com\s*-\s*/i, "")
+        .trim();
     }
 
     const tables = [...html.matchAll(/<table\b[^>]*>[\s\S]*?<\/table>/gi)].map((m) => m[0]);

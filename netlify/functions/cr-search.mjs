@@ -150,13 +150,61 @@ function parseResultsTable(html) {
       tournamentName: tournament,
       date: dateRaw, // формат YYYY/MM/DD
       place,
-      points,
+      roundsPlayed: points, // це кількість турів, НЕ реальні очки (виправлено)
       participants,
       tournamentLink: linkMatch ? linkMatch[1] : null,
+      points: null, // реальні очки підвантажуються окремо (fetchRealPoints)
     });
   }
 
   return { rows, rawSnippet: rows.length ? null : html.slice(0, 3000) };
+}
+
+// Дістає РЕАЛЬНІ очки гравця з таблиці підсумкового рейтингу конкретного турніру.
+// tournamentLink виглядає як "tnr1434540.aspx?lan=1&amp;art=9&amp;snr=1" -
+// snr тут номер гравця в стартовому списку, за яким шукаємо його рядок в таблиці.
+async function fetchRealPoints(tournamentLink, playerName) {
+  try {
+    const cleanLink = decodeEntities(tournamentLink);
+    const fullUrl = `https://chess-results.com/${cleanLink}`;
+    const snrMatch = /[?&]snr=(\d+)/i.exec(cleanLink);
+    const snr = snrMatch ? snrMatch[1] : null;
+
+    const res = await fetch(fullUrl, { headers: { "User-Agent": UA } });
+    const html = await res.text();
+
+    const tables = [...html.matchAll(/<table\b[^>]*>[\s\S]*?<\/table>/gi)].map((m) => m[0]);
+    if (!tables.length) return null;
+    tables.sort((a, b) => b.length - a.length);
+    const table = tables[0];
+
+    const rowsHtml = [...table.matchAll(/<tr\b[^>]*>[\s\S]*?<\/tr>/gi)].map((m) => m[0]);
+    if (!rowsHtml.length) return null;
+
+    const parseCells = (rowHtml) =>
+      [...rowHtml.matchAll(/<t[dh]\b[^>]*>([\s\S]*?)<\/t[dh]>/gi)].map((m) =>
+        decodeEntities(m[1].replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim())
+      );
+
+    // Знаходимо індекс колонки "Pts." / "Punkte" в заголовку
+    const headerCells = parseCells(rowsHtml[0]);
+    const ptsIdx = headerCells.findIndex((c) => /^(pts\.?|points?|punkte)$/i.test(c));
+    const snoIdx = headerCells.findIndex((c) => /^(sno|st\.?nr\.?|no\.?)$/i.test(c));
+    if (ptsIdx === -1) return null;
+
+    for (let i = 1; i < rowsHtml.length; i++) {
+      const cells = parseCells(rowsHtml[i]);
+      if (!cells.length) continue;
+      const matchesBySno = snr && snoIdx !== -1 && cells[snoIdx] === snr;
+      const matchesByName = playerName && cells.some((c) => c && playerName && c.includes(playerName.split(",")[0]));
+      if (matchesBySno || matchesByName) {
+        return cells[ptsIdx] || null;
+      }
+    }
+    return null;
+  } catch {
+    return null;
+  }
 }
 
 export default async (req) => {
@@ -231,11 +279,40 @@ export default async (req) => {
 
     const parsed = parseResultsTable(postHtml);
 
+    // Якщо задано період (days) - фільтруємо ДО збагачення, щоб не робити
+    // зайві запити по всіх ~100+ турнірах, а тільки по потрібних
+    const daysParam = url.searchParams.get("days");
+    const days = daysParam ? parseInt(daysParam, 10) : 0;
+    let resultRows = parsed.rows;
+
+    if (days > 0) {
+      const now = Date.now();
+      resultRows = resultRows.filter((r) => {
+        const m = /^(\d{4})\/(\d{2})\/(\d{2})$/.exec(r.date || "");
+        if (!m) return true;
+        const d = new Date(+m[1], +m[2] - 1, +m[3]).getTime();
+        return (now - d) / (1000 * 60 * 60 * 24) <= days;
+      });
+
+      // Збагачуємо реальними очками, максимум 40 турнірів і пачками по 8,
+      // щоб не перевищити ліміт часу виконання функції
+      const CAP = 40;
+      const toEnrich = resultRows.slice(0, CAP);
+      const BATCH = 8;
+      for (let i = 0; i < toEnrich.length; i += BATCH) {
+        const batch = toEnrich.slice(i, i + BATCH);
+        const results = await Promise.all(batch.map((r) => fetchRealPoints(r.tournamentLink, r.name)));
+        results.forEach((pts, idx) => {
+          batch[idx].points = pts;
+        });
+      }
+    }
+
     const responsePayload = {
       lastName,
       firstName,
-      resultCount: parsed.rows.length,
-      results: parsed.rows,
+      resultCount: resultRows.length,
+      results: resultRows,
     };
     if (debug || !parsed.rows.length) {
       responsePayload.debug = {

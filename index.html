@@ -13,7 +13,7 @@
   *{box-sizing:border-box;}
   body{margin:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
     background:var(--bg);color:var(--text);min-height:100vh;padding:16px;}
-  .wrap{max-width:900px;margin:0 auto;}
+  .wrap{max-width:1000px;margin:0 auto;}
   header{text-align:center;margin-bottom:20px;}
   header .brand{font-size:12px;letter-spacing:2px;color:var(--gold-dim);text-transform:uppercase;margin-bottom:4px;}
   header h1{margin:0;font-size:22px;font-weight:700;
@@ -26,14 +26,18 @@
     font-weight:600;cursor:pointer;font-size:14px;}
   button:hover{background:#e8d38a;}
   .periods{margin-top:10px;}
-  .periods button{background:var(--panel2);color:var(--text);border:1px solid var(--border);margin-right:6px;}
+  .periods button{background:var(--panel2);color:var(--text);border:1px solid var(--border);margin-right:6px;margin-bottom:6px;}
   .periods button.active{background:var(--gold);color:#161512;}
   table{width:100%;border-collapse:collapse;font-size:13px;}
-  th,td{padding:8px;text-align:left;border-bottom:1px solid var(--border);}
-  th{color:var(--gold-dim);font-weight:600;font-size:12px;text-transform:uppercase;}
-  a{color:var(--gold);}
+  th,td{padding:8px;text-align:left;border-bottom:1px solid var(--border);vertical-align:top;}
+  th{color:var(--gold-dim);font-weight:600;font-size:11px;text-transform:uppercase;}
+  a{color:var(--gold);text-decoration:none;}
+  a:hover{text-decoration:underline;}
   .msg{color:var(--text-dim);font-size:13px;padding:8px 0;}
   .err{color:var(--red);}
+  .sub{color:var(--text-dim);font-size:12px;}
+  .place{font-weight:600;}
+  .count{color:var(--text-dim);font-size:12px;margin-bottom:8px;}
 </style>
 </head>
 <body>
@@ -50,10 +54,11 @@
       <button onclick="search()">Пошук</button>
     </div>
     <div class="periods">
-      <button data-days="30" class="active" onclick="setPeriod(30,this)">Місяць</button>
+      <button data-days="30" onclick="setPeriod(30,this)">Місяць</button>
+      <button data-days="90" onclick="setPeriod(90,this)">3 місяці</button>
       <button data-days="182" onclick="setPeriod(182,this)">Півроку</button>
       <button data-days="365" onclick="setPeriod(365,this)">Рік</button>
-      <button data-days="0" onclick="setPeriod(0,this)">Все</button>
+      <button data-days="0" class="active" onclick="setPeriod(0,this)">Все</button>
     </div>
   </div>
 
@@ -63,7 +68,7 @@
 </div>
 
 <script>
-let periodDays = 30;
+let periodDays = 0;
 let lastResults = [];
 
 function setPeriod(days, btn){
@@ -74,9 +79,16 @@ function setPeriod(days, btn){
 }
 
 function parseDate(str){
-  const m = /(\d{2})\.(\d{2})\.(\d{4})/.exec(str||"");
+  // формат YYYY/MM/DD
+  const m = /(\d{4})\/(\d{2})\/(\d{2})/.exec(str||"");
   if(!m) return null;
-  return new Date(+m[3], +m[2]-1, +m[1]);
+  return new Date(+m[1], +m[2]-1, +m[3]);
+}
+
+function formatDate(str){
+  const d = parseDate(str);
+  if(!d) return str || '-';
+  return d.toLocaleDateString('uk-UA');
 }
 
 async function search(){
@@ -114,16 +126,29 @@ function render(){
     return (now - d) / (1000*60*60*24) <= periodDays;
   });
 
+  // сортуємо за датою, новіші зверху
+  filtered.sort((a,b)=>{
+    const da = parseDate(a.date), db = parseDate(b.date);
+    if(!da || !db) return 0;
+    return db - da;
+  });
+
   if(!filtered.length){
     box.innerHTML = '<div class="msg">За обраний період турнірів не знайдено</div>';
     return;
   }
 
-  let html = '<table><tr><th>Дата</th><th>Турнір</th></tr>';
+  let html = `<div class="count">Знайдено: ${filtered.length}</div>`;
+  html += '<table><tr><th>Дата</th><th>Турнір</th><th>Гравець / Клуб</th><th>Місце</th><th>Очки</th></tr>';
   for(const r of filtered){
-    const name = r.tournamentName || r.cells.join(' / ');
-    const link = r.tournamentLink ? `<a href="https://chess-results.com/${r.tournamentLink}" target="_blank">${name}</a>` : name;
-    html += `<tr><td>${r.date||'-'}</td><td>${link}</td></tr>`;
+    const tName = r.tournamentLink ? `<a href="https://chess-results.com/${r.tournamentLink}" target="_blank">${r.tournamentName}</a>` : r.tournamentName;
+    html += `<tr>
+      <td>${formatDate(r.date)}</td>
+      <td>${tName}</td>
+      <td>${r.name}<div class="sub">${r.club||''}${r.club&&r.fed?' · ':''}${r.fed||''}</div></td>
+      <td class="place">${r.place}${r.participants?` / ${r.participants}`:''}</td>
+      <td>${r.points}</td>
+    </tr>`;
   }
   html += '</table>';
   box.innerHTML = html;

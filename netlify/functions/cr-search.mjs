@@ -178,6 +178,15 @@ async function fetchRealPoints(tournamentLink, playerName, debugMode = false) {
     const res = await fetch(fullUrl, { headers: { "User-Agent": UA } });
     const html = await res.text();
 
+    // Повна назва турніру - зазвичай у <title> або в <h2>, часто довша за обрізану
+    // назву, яку показує пошукова таблиця
+    const titleMatch = /<title>([\s\S]*?)<\/title>/i.exec(html);
+    let fullTournamentName = titleMatch ? decodeEntities(titleMatch[1].replace(/\s+/g, " ").trim()) : null;
+    // Прибираємо типовий суфікс "Chess-results.com - " з початку title, якщо є
+    if (fullTournamentName) {
+      fullTournamentName = fullTournamentName.replace(/^chess-results\.com\s*-\s*/i, "").trim();
+    }
+
     const tables = [...html.matchAll(/<table\b[^>]*>[\s\S]*?<\/table>/gi)].map((m) => m[0]);
     if (!tables.length) return debugMode ? { error: "Таблиць не знайдено взагалі", fullUrl } : null;
     tables.sort((a, b) => b.length - a.length);
@@ -199,6 +208,7 @@ async function fetchRealPoints(tournamentLink, playerName, debugMode = false) {
       return {
         fullUrl,
         snr,
+        fullTournamentName,
         headerCells,
         ptsIdx,
         snoIdx,
@@ -206,7 +216,7 @@ async function fetchRealPoints(tournamentLink, playerName, debugMode = false) {
       };
     }
 
-    if (ptsIdx === -1) return null;
+    if (ptsIdx === -1) return { points: null, fullTournamentName };
 
     for (let i = 1; i < rowsHtml.length; i++) {
       const cells = parseCells(rowsHtml[i]);
@@ -214,12 +224,12 @@ async function fetchRealPoints(tournamentLink, playerName, debugMode = false) {
       const matchesBySno = snr && snoIdx !== -1 && cells[snoIdx] === snr;
       const matchesByName = playerName && cells.some((c) => c && playerName && c.includes(playerName.split(",")[0]));
       if (matchesBySno || matchesByName) {
-        return cells[ptsIdx] || null;
+        return { points: cells[ptsIdx] || null, fullTournamentName };
       }
     }
-    return null;
+    return { points: null, fullTournamentName };
   } catch (err) {
-    return debugMode ? { error: String(err) } : null;
+    return debugMode ? { error: String(err) } : { points: null, fullTournamentName: null };
   }
 }
 
@@ -327,8 +337,9 @@ export default async (req) => {
       for (let i = 0; i < toEnrich.length; i += BATCH) {
         const batch = toEnrich.slice(i, i + BATCH);
         const results = await Promise.all(batch.map((r) => fetchRealPoints(r.tournamentLink, r.name)));
-        results.forEach((pts, idx) => {
-          batch[idx].points = pts;
+        results.forEach((res, idx) => {
+          batch[idx].points = res?.points ?? null;
+          if (res?.fullTournamentName) batch[idx].tournamentName = res.fullTournamentName;
         });
       }
     }

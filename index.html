@@ -38,6 +38,7 @@
   .sub{color:var(--text-dim);font-size:12px;}
   .place{font-weight:600;}
   .count{color:var(--text-dim);font-size:12px;margin-bottom:8px;}
+  .hint{color:var(--text-dim);font-size:11px;margin-top:6px;}
 </style>
 </head>
 <body>
@@ -60,6 +61,7 @@
       <button data-days="365" onclick="setPeriod(365,this)">Рік</button>
       <button data-days="0" class="active" onclick="setPeriod(0,this)">Все</button>
     </div>
+    <div class="hint">Для періодів (крім "Все") очки підвантажуються з таблиць турнірів окремо — це займає кілька секунд.</div>
   </div>
 
   <div class="panel" id="results">
@@ -69,17 +71,16 @@
 
 <script>
 let periodDays = 0;
-let lastResults = [];
+let lastQuery = null;
 
 function setPeriod(days, btn){
   periodDays = days;
   document.querySelectorAll('.periods button').forEach(b=>b.classList.remove('active'));
   btn.classList.add('active');
-  render();
+  if(lastQuery) runSearch();
 }
 
 function parseDate(str){
-  // формат YYYY/MM/DD
   const m = /(\d{4})\/(\d{2})\/(\d{2})/.exec(str||"");
   if(!m) return null;
   return new Date(+m[1], +m[2]-1, +m[3]);
@@ -91,63 +92,61 @@ function formatDate(str){
   return d.toLocaleDateString('uk-UA');
 }
 
-async function search(){
+function search(){
   const last = document.getElementById('last').value.trim();
   const first = document.getElementById('first').value.trim();
-  const box = document.getElementById('results');
-  if(!last){ box.innerHTML = '<div class="msg err">Введіть прізвище</div>'; return; }
+  if(!last){
+    document.getElementById('results').innerHTML = '<div class="msg err">Введіть прізвище</div>';
+    return;
+  }
+  lastQuery = { last, first };
+  runSearch();
+}
 
-  box.innerHTML = '<div class="msg">Шукаю...</div>';
+async function runSearch(){
+  const box = document.getElementById('results');
+  const { last, first } = lastQuery;
+  box.innerHTML = `<div class="msg">Шукаю${periodDays ? ' і підвантажую очки...' : '...'}</div>`;
   try{
-    const res = await fetch(`/.netlify/functions/cr-search?last=${encodeURIComponent(last)}&first=${encodeURIComponent(first)}`);
+    const params = new URLSearchParams({ last, first });
+    if(periodDays) params.set('days', periodDays);
+    const res = await fetch(`/.netlify/functions/cr-search?${params}`);
     const data = await res.json();
     if(data.error){
       box.innerHTML = `<div class="msg err">Помилка: ${data.error}</div>`;
       console.log('debug', data);
       return;
     }
-    lastResults = data.results || [];
-    render();
+    render(data.results || []);
   }catch(e){
     box.innerHTML = `<div class="msg err">Помилка запиту: ${e}</div>`;
   }
 }
 
-function render(){
+function render(results){
   const box = document.getElementById('results');
-  if(!lastResults.length){
-    box.innerHTML = '<div class="msg">Нічого не знайдено</div>';
+  if(!results.length){
+    box.innerHTML = '<div class="msg">За обраний період турнірів не знайдено</div>';
     return;
   }
-  const now = new Date();
-  const filtered = periodDays === 0 ? lastResults : lastResults.filter(r=>{
-    const d = parseDate(r.date);
-    if(!d) return true;
-    return (now - d) / (1000*60*60*24) <= periodDays;
-  });
 
-  // сортуємо за датою, новіші зверху
-  filtered.sort((a,b)=>{
+  results.sort((a,b)=>{
     const da = parseDate(a.date), db = parseDate(b.date);
     if(!da || !db) return 0;
     return db - da;
   });
 
-  if(!filtered.length){
-    box.innerHTML = '<div class="msg">За обраний період турнірів не знайдено</div>';
-    return;
-  }
-
-  let html = `<div class="count">Знайдено: ${filtered.length}</div>`;
+  let html = `<div class="count">Знайдено: ${results.length}</div>`;
   html += '<table><tr><th>Дата</th><th>Турнір</th><th>Гравець / Клуб</th><th>Місце</th><th>Очки</th></tr>';
-  for(const r of filtered){
+  for(const r of results){
     const tName = r.tournamentLink ? `<a href="https://chess-results.com/${r.tournamentLink}" target="_blank">${r.tournamentName}</a>` : r.tournamentName;
+    const pointsCell = r.points !== null && r.points !== undefined ? r.points : `<span class="sub">${r.roundsPlayed||''} тур.</span>`;
     html += `<tr>
       <td>${formatDate(r.date)}</td>
       <td>${tName}</td>
       <td>${r.name}<div class="sub">${r.club||''}${r.club&&r.fed?' · ':''}${r.fed||''}</div></td>
       <td class="place">${r.place}${r.participants?` / ${r.participants}`:''}</td>
-      <td>${r.points}</td>
+      <td>${pointsCell}</td>
     </tr>`;
   }
   html += '</table>';

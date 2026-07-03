@@ -166,9 +166,14 @@ function parseResultsTable(html) {
 async function fetchRealPoints(tournamentLink, playerName, debugMode = false) {
   try {
     const cleanLink = decodeEntities(tournamentLink);
-    const fullUrl = `https://chess-results.com/${cleanLink}`;
     const snrMatch = /[?&]snr=(\d+)/i.exec(cleanLink);
     const snr = snrMatch ? snrMatch[1] : null;
+
+    // tournamentLink веде на art=9 (партії конкретного гравця по турах - немає підсумкових очок).
+    // Нам потрібна ПІДСУМКОВА ТАБЛИЦЯ турніру - art=1 (той самий tnr, без snr).
+    const tnrMatch = /^(tnr\d+)\.aspx/i.exec(cleanLink);
+    const tnrId = tnrMatch ? tnrMatch[1] : null;
+    const fullUrl = tnrId ? `https://chess-results.com/${tnrId}.aspx?lan=1&art=1` : `https://chess-results.com/${cleanLink}`;
 
     const res = await fetch(fullUrl, { headers: { "User-Agent": UA } });
     const html = await res.text();

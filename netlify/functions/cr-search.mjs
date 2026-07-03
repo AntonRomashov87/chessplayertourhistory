@@ -42,6 +42,32 @@ function findInputNear(html, labelVariants) {
   return null;
 }
 
+// Діагностика: перелік УСІХ видимих (не hidden) input/select полів
+// разом із текстом, що йде безпосередньо ПЕРЕД ними (підказка-мітка)
+function listFieldCandidates(html) {
+  const tagRegex = /<(input|select)\b[^>]*>/gi;
+  const results = [];
+  let m;
+  while ((m = tagRegex.exec(html))) {
+    const tag = m[0];
+    const type = /type=["']([^"']+)["']/i.exec(tag)?.[1] || (m[1].toLowerCase() === "select" ? "select" : "text");
+    if (type === "hidden") continue;
+    const name = /name=["']([^"']+)["']/i.exec(tag)?.[1] || null;
+    if (!name) continue;
+
+    const before = html.slice(Math.max(0, m.index - 250), m.index);
+    const labelGuess = before
+      .replace(/<[^>]+>/g, " ")
+      .replace(/&nbsp;/g, " ")
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(-70);
+
+    results.push({ tagName: m[1], name, type, labelGuess });
+  }
+  return results;
+}
+
 function findSubmitButton(html) {
   // ASP.NET LinkButton -> викликає __doPostBack('ID','') замість справжнього submit.
   // Шукаємо onclick="...__doPostBack('...Search...','')" або input[type=submit]
@@ -133,7 +159,7 @@ export default async (req) => {
             firstNameField,
             submitInfo,
             hiddenFieldsFound: Object.keys(hidden),
-            htmlSnippet: getHtml.slice(0, 3000),
+            fieldCandidates: listFieldCandidates(getHtml),
           },
           null,
           2
@@ -194,4 +220,3 @@ export default async (req) => {
     });
   }
 };
-

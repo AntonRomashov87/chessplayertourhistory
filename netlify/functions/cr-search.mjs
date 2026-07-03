@@ -105,6 +105,16 @@ function parseCookies(setCookieHeader) {
     .join("; ");
 }
 
+function decodeEntities(str) {
+  if (!str) return str;
+  return str
+    .replace(/&#(\d+);/g, (_, code) => String.fromCharCode(parseInt(code, 10)))
+    .replace(/&quot;/g, '"')
+    .replace(/&amp;/g, "&")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&#8217;/g, "’");
+}
+
 function parseResultsTable(html) {
   // Беремо найбільшу <table>...</table> у відповіді як таблицю результатів
   const tables = [...html.matchAll(/<table\b[^>]*>[\s\S]*?<\/table>/gi)].map((m) => m[0]);
@@ -118,23 +128,32 @@ function parseResultsTable(html) {
 
   for (const rowHtml of rowsHtml) {
     const cells = [...rowHtml.matchAll(/<t[dh]\b[^>]*>([\s\S]*?)<\/t[dh]>/gi)].map((m) =>
-      m[1].replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim()
+      decodeEntities(m[1].replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim())
     );
-    if (!cells.length) continue;
+    if (cells.length < 10) continue; // рядок-заголовок або службовий рядок пропускаємо
 
-    // Дата турніру зазвичай у форматі DD.MM.YYYY десь у рядку
-    const dateCell = cells.find((c) => /\b\d{2}\.\d{2}\.\d{4}\b/.test(c));
-    // Посилання на турнір (назва турніру як текст лінку)
-    const linkMatch = /<a\b[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/i.exec(rowHtml);
+    // Реальна структура колонок chess-results.com (визначено емпірично):
+    // 0 Ім'я, 1 Рейтинг, 2 Fide-ID, 3 Клуб, 4 Федерація, 5 Турнір,
+    // 6 Дата (YYYY/MM/DD), 7 Місце, 8 Очки, 9 К-сть учасників
+    const [name, rtg, fideId, club, fed, tournament, dateRaw, place, points, participants] = cells;
 
-    if (dateCell || linkMatch) {
-      rows.push({
-        cells,
-        date: dateCell || null,
-        tournamentName: linkMatch ? linkMatch[2].replace(/<[^>]+>/g, "").trim() : null,
-        tournamentLink: linkMatch ? linkMatch[1] : null,
-      });
-    }
+    if (!/^\d{4}\/\d{2}\/\d{2}$/.test(dateRaw || "")) continue; // не рядок турніру
+
+    const linkMatch = /<a\b[^>]*href=["']([^"']+)["'][^>]*>/i.exec(rowHtml);
+
+    rows.push({
+      name,
+      rtg,
+      fideId,
+      club,
+      fed,
+      tournamentName: tournament,
+      date: dateRaw, // формат YYYY/MM/DD
+      place,
+      points,
+      participants,
+      tournamentLink: linkMatch ? linkMatch[1] : null,
+    });
   }
 
   return { rows, rawSnippet: rows.length ? null : html.slice(0, 3000) };
